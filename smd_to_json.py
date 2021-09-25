@@ -53,7 +53,8 @@ def smd_file_to_json(file):
     i+=2
     frame = -1
     cur_frame = {}
-    for z in progressbar(range(i, size, 1)):
+    #for z in progressbar(range(i, size, 1)):
+    for z in range(i, size, 1):
         if 'end' in data[z]: break
         if 'time' in data[z]:
             frame += 1
@@ -65,8 +66,9 @@ def smd_file_to_json(file):
             #print(str(res))
             cur_bone = bones[int(line[-7])]
             cur_frame[cur_bone] = {
-                'Translate': [(float(line[-6])),(float(line[-5])),(float(line[-4]))],
-                'Rotate': [rad_to_deg(line[-3]),rad_to_deg(line[-2]),rad_to_deg(line[-1])]
+                'translate': [(float(line[-6])),(float(line[-5])),(float(line[-4]))],
+                'rotate': [rad_to_deg(line[-3]),rad_to_deg(line[-2]),rad_to_deg(line[-1])],
+                'scale': [1.0,1.0,1.0]
             }
 
 
@@ -81,20 +83,20 @@ def json_to_smd_str(res, file, commas=False):
         out_s += f'{res["bones"][bone][0]} \"{bone}\" {res["bones"][bone][1]}\n'
     out_s += f'end\nskeleton\n'
     size = get_frames_count(res)
-    #for frame in res['frames']:
-    for i in progressbar(range(size)):
+    #for i in progressbar(range(size)):
+    for i in range(size):
         frame = res['frames'][i]
         out_s += f'time {str(i)}\n'
         for bone in frame:
             id = res['bones'][bone][0]
             out_s += id + ' '
-            out_s += f'{zeros_str(frame[bone]["Translate"][0])} '
-            out_s += f'{zeros_str(frame[bone]["Translate"][1])} '
-            out_s += f'{zeros_str(frame[bone]["Translate"][2])} '
+            out_s += f'{zeros_str(frame[bone]["translate"][0])} '
+            out_s += f'{zeros_str(frame[bone]["translate"][1])} '
+            out_s += f'{zeros_str(frame[bone]["translate"][2])} '
 
-            out_s += f'{deg_to_rad(frame[bone]["Rotate"][0])} '
-            out_s += f'{deg_to_rad(frame[bone]["Rotate"][1])} '
-            out_s += f'{deg_to_rad(frame[bone]["Rotate"][2])}\n'
+            out_s += f'{deg_to_rad(frame[bone]["rotate"][0])} '
+            out_s += f'{deg_to_rad(frame[bone]["rotate"][1])} '
+            out_s += f'{deg_to_rad(frame[bone]["rotate"][2])}\n'
     out_s += f'end\n'
     if commas:
         out_s = out_s.replace('.',',')
@@ -108,7 +110,7 @@ def scale_animation(res, x):
     for frame in res['frames']:
         for bone in frame:
             for i in range(3):
-                frame[bone]['Translate'][i] *= r
+                frame[bone]['translate'][i] *= r
     return res
 
 def insert_frame(dict_frame, res, index):
@@ -145,15 +147,15 @@ def move_bone_in_all_frames(res, bone_name, offsets):
     for frame in res['frames']:
         if bone_name in frame:
             for k in range(3):
-                frame[bone_name]['Translate'][k] += offsets[k]
+                frame[bone_name]['translate'][k] += offsets[k]
     return res
 
 def clear_json(res):
     for frame in res['frames']:
         for bone in frame:
             frame[bone] = {
-                'Translate': [0.0, 0.0, 0.0],
-                'Rotate': [0.0, 0.0, 0.0]
+                'translate': [0.0, 0.0, 0.0],
+                'rotate': [0.0, 0.0, 0.0]
             }
     return res
 
@@ -185,6 +187,20 @@ def get_bones_tree(res):
         bones_names.remove(bone_name)
     return bones_tree
 
+def is_last_fr(vals, index):
+    for val in vals:
+        if vals[val] == index: return False
+    return True
+
+def rem_red_fr(vals):
+    tmp = []
+    for fr in list(vals):
+        val = vals[fr]
+        if val in tmp: del vals[fr]
+        else: tmp.append(val)
+    return vals
+
+
 def animation_to_anim(res):
     out_s = """animVersion 1.1;
 mayaVersion 2022;
@@ -196,11 +212,37 @@ startTime 0;\n"""
     out_s += f'endTime {str(size)};\n'
     bones_tree = get_bones_tree(res)
     dims = ['X','Y','Z']
+    op = ['scale','translate','rotate']
     for bone in bones_tree:
         if bone:
-            for dim in dims:
-                out_s += f'anim scale.scale{dim} scale{dim} {bone} 0 {str(len(bone))} 0;\n'
-                out_s += 'animData {\n  input time;\n  output unitless;\n  weighted 0;\n  preInfinity constant;\n'
-                out_s += '  keys {\n'
-                for i,frame in enumerate(res['frames']): pass
+            for x in range(3):
+                for o in op:
+                    out_s += f'anim {o}.{o}{dims[x]} {o}{dims[x]} {bone} 0 {str(len(bone))} 0;\n'
+                    out_s += 'animData {\n  input time;\n  output unitless;\n  weighted 0;\n  preInfinity constant;\n'
+                    out_s += '  keys {\n'
+                    dist_frames = []
+                    vals = {}
+                    for i in range(size):
+                        frame = res['frames'][i]
+                        val = str(zeros_str(frame[bone][o][x]))
+                        if not val in vals: vals[str(i)] = val
+                        #ff = f'{str(i)} {val} fixed fixed 1 0 0 0 1 0 1;\n'
+                        #if i==size-1: dist_frames.append(ff)
+                        #elif not ff in dist_frames: dist_frames.append(ff)
+                    #print(str(vals), str(size))
+                    for elem in vals: print(elem,vals)
+                    #print(o, str(size-1) in vals)
+                    last_val = str(vals[str(size-1)])
+                    vals = rem_red_fr(vals)
+                    for val in vals:
+                        if val == '0':
+                            out_s += f'    {val} {vals[val]} fixed fixed 1 0 0 0 1 0 1;\n'
+                        else:
+                            out_s += f'    {val} {vals[val]} linear linear 1 0 0;\n'
+                    out_s += f'    {str(size-1)} {last_val} linear linear 1 0 0;\n'
+                    out_s += '  }\n}\n\n'
+                    #for ff in dist_frames: out_s += ff
+        break
+    with open('test.anim', 'w') as f: f.write(out_s)
+    #print(out_s)
     #for bone in bones:
